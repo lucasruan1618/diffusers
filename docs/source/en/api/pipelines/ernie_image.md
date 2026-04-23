@@ -84,3 +84,21 @@ images = pipe(
 ).images
 images[0].save("ernie-image-turbo-output.png")
 ```
+
+## ErnieImageImg2ImgPipeline
+
+Use [`ErnieImageImg2ImgPipeline`] to transform an input image while keeping the ERNIE prompt-conditioning and optional Prompt Enhancer workflow.
+
+## API
+
+### ErnieImagePipeline
+
+[[autodoc]] ErnieImagePipeline
+  - all
+  - __call__
+
+### ErnieImageImg2ImgPipeline
+
+[[autodoc]] ErnieImageImg2ImgPipeline
+  - all
+  - __call__

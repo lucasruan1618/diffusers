@@ -41,6 +41,7 @@ from .controlnet_sd3 import (
 )
 from .deepfloyd_if import IFImg2ImgPipeline, IFInpaintingPipeline, IFPipeline
 from .deprecated.wuerstchen import WuerstchenCombinedPipeline, WuerstchenDecoderPipeline
+from .ernie_image import ErnieImageImg2ImgPipeline, ErnieImagePipeline
 from .flux import (
     FluxControlImg2ImgPipeline,
     FluxControlInpaintPipeline,
@@ -181,6 +182,7 @@ AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
         ("helios-pyramid", HeliosPyramidPipeline),
         ("cogview4-control", CogView4ControlPipeline),
         ("nucleusmoe-image", NucleusMoEImagePipeline),
+        ("ernie-image", ErnieImagePipeline),
         ("qwenimage", QwenImagePipeline),
         ("qwenimage-controlnet", QwenImageControlNetPipeline),
         ("z-image", ZImagePipeline),
@@ -212,6 +214,7 @@ AUTO_IMAGE2IMAGE_PIPELINES_MAPPING = OrderedDict(
         ("flux", FluxImg2ImgPipeline),
         ("flux-controlnet", FluxControlNetImg2ImgPipeline),
         ("flux-control", FluxControlImg2ImgPipeline),
+        ("ernie-image", ErnieImageImg2ImgPipeline),
         ("flux-kontext", FluxKontextPipeline),
         ("flux2-klein", Flux2KleinPipeline),
         ("flux2", Flux2Pipeline),

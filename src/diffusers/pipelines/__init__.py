@@ -341,7 +341,7 @@ else:
     )
     _import_structure["mochi"] = ["MochiPipeline"]
     _import_structure["omnigen"] = ["OmniGenPipeline"]
-    _import_structure["ernie_image"] = ["ErnieImagePipeline"]
+    _import_structure["ernie_image"] = ["ErnieImageImg2ImgPipeline", "ErnieImagePipeline"]
     _import_structure["ovis_image"] = ["OvisImagePipeline"]
     _import_structure["visualcloze"] = ["VisualClozePipeline", "VisualClozeGenerationPipeline"]
     _import_structure["pixart_alpha"] = ["PixArtAlphaPipeline", "PixArtSigmaPipeline"]
@@ -685,7 +685,7 @@ if TYPE_CHECKING or DIFFUSERS_SLOW_IMPORT:
             EasyAnimateInpaintPipeline,
             EasyAnimatePipeline,
         )
-        from .ernie_image import ErnieImagePipeline
+        from .ernie_image import ErnieImageImg2ImgPipeline, ErnieImagePipeline
         from .flux import (
             FluxControlImg2ImgPipeline,
             FluxControlInpaintPipeline,
