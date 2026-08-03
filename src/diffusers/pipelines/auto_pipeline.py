@@ -59,7 +59,7 @@ from .flux2 import Flux2KleinPipeline, Flux2Pipeline
 from .glm_image import GlmImagePipeline
 from .helios import HeliosPipeline, HeliosPyramidPipeline
 from .hunyuandit import HunyuanDiTPipeline
-from .ideogram4 import Ideogram4Pipeline
+from .ideogram4 import Ideogram4InpaintPipeline, Ideogram4Pipeline
 from .kandinsky import (
     KandinskyCombinedPipeline,
     KandinskyImg2ImgCombinedPipeline,
@@ -254,6 +254,7 @@ AUTO_INPAINT_PIPELINES_MAPPING = OrderedDict(
         ("flux", FluxInpaintPipeline),
         ("flux-controlnet", FluxControlNetInpaintPipeline),
         ("flux-control", FluxControlInpaintPipeline),
+        ("ideogram4", Ideogram4InpaintPipeline),
         ("stable-diffusion-pag", StableDiffusionPAGInpaintPipeline),
         ("qwenimage", QwenImageInpaintPipeline),
         ("qwenimage-edit", QwenImageEditInpaintPipeline),

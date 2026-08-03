@@ -108,6 +108,12 @@ image.save("ideogram4_upsampled.png")
 	- all
 	- __call__
 
+## Ideogram4InpaintPipeline
+
+[[autodoc]] Ideogram4InpaintPipeline
+	- all
+	- __call__
+
 ## Ideogram4PromptEnhancerHead
 
 [[autodoc]] Ideogram4PromptEnhancerHead
