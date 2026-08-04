@@ -75,7 +75,8 @@ class Krea2AttnProcessor:
             key = apply_rotary_emb(key, image_rotary_emb, sequence_dim=1)
 
         enable_gqa = attn.num_heads != attn.num_kv_heads
-        if attention_mask is not None and attention_mask.dtype != torch.bool and enable_gqa:
+        if attention_mask is not None and enable_gqa:
+            # Explicit KV expansion allows fused SDPA backends that do not support masked GQA.
             repeats = attn.num_heads // attn.num_kv_heads
             key = key.repeat_interleave(repeats, dim=2)
             value = value.repeat_interleave(repeats, dim=2)
