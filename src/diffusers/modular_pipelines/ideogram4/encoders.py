@@ -466,7 +466,7 @@ class Ideogram4TextEncoderStep(ModularPipelineBlocks):
 
       Outputs:
           text_features (`Tensor`):
-              Per-prompt text features (B, max_sequence_length, llm_features_dim), padding zeroed.
+              Per-prompt text features padded to the longest prompt in the batch.
           text_lengths (`list`):
               Per-prompt real text-token counts, used to lay out the packed sequence.
     """
@@ -502,7 +502,7 @@ class Ideogram4TextEncoderStep(ModularPipelineBlocks):
             OutputParam(
                 name="text_features",
                 type_hint=torch.Tensor,
-                description="Per-prompt text features (B, max_sequence_length, llm_features_dim), padding zeroed.",
+                description="Per-prompt text features padded to the longest prompt in the batch.",
             ),
             OutputParam(
                 name="text_lengths",
@@ -561,24 +561,31 @@ class Ideogram4TextEncoderStep(ModularPipelineBlocks):
         # The component-level offload hook does not run because the encoder submodules are called directly below.
         device = components.text_encoder.device
         tokenizer = components.tokenizer
-        max_text_tokens = block_state.max_sequence_length
+        max_sequence_length = block_state.max_sequence_length
 
         prompts = [block_state.prompt] if isinstance(block_state.prompt, str) else list(block_state.prompt)
         batch_size = len(prompts)
 
-        # Tokenize each chat-formatted prompt and left-pad to `max_sequence_length`.
-        token_ids = torch.zeros(batch_size, max_text_tokens, dtype=torch.long)
-        attention_mask = torch.zeros(batch_size, max_text_tokens, dtype=torch.long)
-        text_position_ids = torch.zeros(batch_size, max_text_tokens, dtype=torch.long)
+        # Tokenize each chat-formatted prompt and left-pad to the longest prompt in the batch. The configured maximum
+        # is only an upper bound; processing its padding through every encoder and transformer layer is unnecessary.
+        prompt_token_ids = []
         text_lengths = []
-        for b, text_prompt in enumerate(prompts):
+        for text_prompt in prompts:
             messages = [{"role": "user", "content": [{"type": "text", "text": text_prompt}]}]
             text = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             toks = tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
             n = int(toks.shape[0])
-            if n > max_text_tokens:
-                raise ValueError(f"prompt has {n} tokens, exceeds max_sequence_length={max_text_tokens}")
+            if n > max_sequence_length:
+                raise ValueError(f"prompt has {n} tokens, exceeds max_sequence_length={max_sequence_length}")
+            prompt_token_ids.append(toks)
             text_lengths.append(n)
+
+        max_text_tokens = max(text_lengths)
+        token_ids = torch.zeros(batch_size, max_text_tokens, dtype=torch.long)
+        attention_mask = torch.zeros(batch_size, max_text_tokens, dtype=torch.long)
+        text_position_ids = torch.zeros(batch_size, max_text_tokens, dtype=torch.long)
+        for b, toks in enumerate(prompt_token_ids):
+            n = text_lengths[b]
             offset = max_text_tokens - n
             token_ids[b, offset:] = toks
             attention_mask[b, offset:] = 1

@@ -23,8 +23,10 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     Ideogram4AutoBlocks,
     Ideogram4ModularPipeline,
+    Ideogram4Pipeline,
     Ideogram4Transformer2DModel,
 )
+from diffusers.models.transformers.transformer_ideogram4 import LLM_TOKEN_INDICATOR
 
 from ...testing_utils import enable_full_determinism
 from ..test_modular_pipelines_common import ModularPipelineTesterMixin
@@ -210,3 +212,51 @@ class TestIdeogram4ModularPipelineFast(ModularPipelineTesterMixin):
         assert len(image) == 1
         assert image[0].size == (32, 32)
         assert np.isfinite(np.asarray(image[0])).all()
+
+    def test_prompt_padding_is_compacted(self):
+        prompts = ["cat", "cat wizard"]
+        max_sequence_length = 32
+
+        standard_pipe = Ideogram4Pipeline(**get_dummy_components())
+        prompt_embeds, position_ids, segment_ids, indicator = standard_pipe.encode_prompt(
+            prompt=prompts,
+            grid_h=2,
+            grid_w=2,
+            max_sequence_length=max_sequence_length,
+            device=torch.device("cpu"),
+        )
+        text_lengths = (indicator == LLM_TOKEN_INDICATOR).sum(dim=1)
+        assert prompt_embeds.shape[1] == text_lengths.max().item() + 4
+        assert prompt_embeds.shape[1] < max_sequence_length + 4
+
+        compact_inputs = standard_pipe.encode_prompt(
+            prompt=prompts[0],
+            grid_h=2,
+            grid_w=2,
+            max_sequence_length=max_sequence_length,
+            device=torch.device("cpu"),
+        )
+        image_latents = torch.randn(1, 4, standard_pipe.transformer.config.in_channels)
+        image_outputs = []
+        for conditioning in (compact_inputs, (prompt_embeds[:1], position_ids[:1], segment_ids[:1], indicator[:1])):
+            embeddings, positions, segments, indicators = conditioning
+            num_text_tokens = embeddings.shape[1] - 4
+            hidden_states = torch.cat([torch.zeros(1, num_text_tokens, image_latents.shape[-1]), image_latents], dim=1)
+            output = standard_pipe.transformer(
+                hidden_states=hidden_states,
+                timestep=torch.zeros(1),
+                encoder_hidden_states=embeddings,
+                position_ids=positions,
+                segment_ids=segments,
+                indicator=indicators,
+                return_dict=False,
+            )[0]
+            image_outputs.append(output[:, -4:])
+        torch.testing.assert_close(*image_outputs)
+
+        pipe = self.get_pipeline()
+        inputs = self.get_dummy_inputs()
+        inputs.update({"prompt": prompts, "max_sequence_length": max_sequence_length})
+        outputs = pipe(**inputs, output=["text_features", "text_lengths"])
+        assert outputs["text_features"].shape[1] == max(outputs["text_lengths"])
+        assert outputs["text_features"].shape[1] < max_sequence_length

@@ -349,21 +349,29 @@ class Ideogram4Pipeline(DiffusionPipeline, Ideogram4LoraLoaderMixin):
         batch_size = len(prompts)
         num_image_tokens = grid_h * grid_w
 
-        # Tokenize each chat-formatted prompt and left-pad to `max_sequence_length`. Only the text region is fed to
-        # the encoder: the packed image tokens come after the text and the encoder is causal, so they never affect it.
-        token_ids = torch.zeros(batch_size, max_sequence_length, dtype=torch.long)
-        attention_mask = torch.zeros(batch_size, max_sequence_length, dtype=torch.long)
-        text_position_ids = torch.zeros(batch_size, max_sequence_length, dtype=torch.long)
+        # Tokenize each chat-formatted prompt and left-pad to the longest prompt in the batch. Only the text region is
+        # fed to the encoder: the packed image tokens come after the text and the encoder is causal, so they never
+        # affect it. `max_sequence_length` is an upper bound rather than a reason to process padding through every
+        # text-encoder and diffusion-transformer layer.
+        prompt_token_ids = []
         text_lengths = []
-        for b, text_prompt in enumerate(prompts):
+        for text_prompt in prompts:
             messages = [{"role": "user", "content": [{"type": "text", "text": text_prompt}]}]
             text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             toks = self.tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
             n = int(toks.shape[0])
             if n > max_sequence_length:
                 raise ValueError(f"prompt has {n} tokens, exceeds max_sequence_length={max_sequence_length}")
+            prompt_token_ids.append(toks)
             text_lengths.append(n)
-            offset = max_sequence_length - n
+
+        max_text_tokens = max(text_lengths)
+        token_ids = torch.zeros(batch_size, max_text_tokens, dtype=torch.long)
+        attention_mask = torch.zeros(batch_size, max_text_tokens, dtype=torch.long)
+        text_position_ids = torch.zeros(batch_size, max_text_tokens, dtype=torch.long)
+        for b, toks in enumerate(prompt_token_ids):
+            n = text_lengths[b]
+            offset = max_text_tokens - n
             token_ids[b, offset:] = toks
             attention_mask[b, offset:] = 1
             text_position_ids[b, offset:] = torch.arange(n)
@@ -383,13 +391,11 @@ class Ideogram4Pipeline(DiffusionPipeline, Ideogram4LoraLoaderMixin):
         selected = self._get_text_encoder_hidden_states(
             self.text_encoder, token_ids, attention_mask, text_position_ids
         )
-        text_features = torch.stack(selected, dim=0).permute(1, 2, 3, 0).reshape(batch_size, max_sequence_length, -1)
+        text_features = torch.stack(selected, dim=0).permute(1, 2, 3, 0).reshape(batch_size, max_text_tokens, -1)
         text_features = (text_features * attention_mask.to(text_features.dtype).unsqueeze(-1)).to(torch.float32)
         text_features = text_features.to(device)
 
-        position_ids, segment_ids, indicator = self._prepare_ids(
-            text_lengths, grid_h, grid_w, max_sequence_length, device
-        )
+        position_ids, segment_ids, indicator = self._prepare_ids(text_lengths, grid_h, grid_w, max_text_tokens, device)
 
         # Pack the text features into the full sequence; image positions carry no text features.
         image_feature_padding = torch.zeros(
@@ -613,6 +619,7 @@ class Ideogram4Pipeline(DiffusionPipeline, Ideogram4LoraLoaderMixin):
         position_ids = _expand_tensor_to_effective_batch(position_ids, batch_size, num_images_per_prompt)
         segment_ids = _expand_tensor_to_effective_batch(segment_ids, batch_size, num_images_per_prompt)
         indicator = _expand_tensor_to_effective_batch(indicator, batch_size, num_images_per_prompt)
+        max_text_tokens = llm_features.shape[1] - num_image_tokens
 
         # 4. Unconditional (image-only) branch, derived from the conditioning: zeroed text features and the
         # image-region slices of the layout.
@@ -623,9 +630,9 @@ class Ideogram4Pipeline(DiffusionPipeline, Ideogram4LoraLoaderMixin):
             dtype=llm_features.dtype,
             device=device,
         )
-        neg_position_ids = position_ids[:, max_sequence_length:]
-        neg_segment_ids = segment_ids[:, max_sequence_length:]
-        neg_indicator = indicator[:, max_sequence_length:]
+        neg_position_ids = position_ids[:, max_text_tokens:]
+        neg_segment_ids = segment_ids[:, max_text_tokens:]
+        neg_indicator = indicator[:, max_text_tokens:]
 
         # 4. Set up the resolution-aware logit-normal schedule on the scheduler.
         schedule_mu = _resolution_aware_mu(height=height, width=width, base_mu=mu)
@@ -653,7 +660,6 @@ class Ideogram4Pipeline(DiffusionPipeline, Ideogram4LoraLoaderMixin):
         )
 
         # 7. Padding for the text region of the conditional packed sequence (image latents are appended after it).
-        max_text_tokens = max_sequence_length
         text_z_padding = torch.zeros(
             batch_size * num_images_per_prompt,
             max_text_tokens,
