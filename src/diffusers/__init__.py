@@ -198,6 +198,7 @@ else:
     )
     _import_structure["hooks"].extend(
         [
+            "DPCacheConfig",
             "FasterCacheConfig",
             "FirstBlockCacheConfig",
             "HookRegistry",
@@ -208,6 +209,7 @@ else:
             "SmoothedEnergyGuidanceConfig",
             "TaylorSeerCacheConfig",
             "TextKVCacheConfig",
+            "apply_dp_cache",
             "apply_faster_cache",
             "apply_first_block_cache",
             "apply_layer_skip",
@@ -1082,6 +1084,7 @@ if TYPE_CHECKING or DIFFUSERS_SLOW_IMPORT:
             TangentialClassifierFreeGuidance,
         )
         from .hooks import (
+            DPCacheConfig,
             FasterCacheConfig,
             FirstBlockCacheConfig,
             HookRegistry,
@@ -1092,6 +1095,7 @@ if TYPE_CHECKING or DIFFUSERS_SLOW_IMPORT:
             SmoothedEnergyGuidanceConfig,
             TaylorSeerCacheConfig,
             TextKVCacheConfig,
+            apply_dp_cache,
             apply_faster_cache,
             apply_first_block_cache,
             apply_layer_skip,

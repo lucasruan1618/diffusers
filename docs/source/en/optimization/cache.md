@@ -68,6 +68,93 @@ config = FasterCacheConfig(
 pipeline.transformer.enable_cache(config)
 ```
 
+## DPCache
+
+[DPCache](https://huggingface.co/papers/2602.22654) uses calibration features to plan which denoising steps run the
+transformer stack. Other steps predict its final features with a Taylor expansion. The scheduler still runs every
+step. The shared implementation supports [`FluxTransformer2DModel`] and [`WanTransformer3DModel`].
+
+First, calibrate on representative prompts with the same checkpoint, scheduler, step count, resolution, guidance,
+and prediction order you will use for inference. Calibration executes all blocks and stores one trajectory of
+final-stack features on CPU. Completed trajectories contribute to an average path-aware cost tensor; the features
+are then released. Conditional and unconditional calls have separate histories and both contribute calibration
+samples when present.
+
+```python
+import torch
+from diffusers import DPCacheConfig, FluxPipeline
+
+pipe = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-dev", torch_dtype=torch.bfloat16).to("cuda")
+calibration = DPCacheConfig(num_inference_steps=50, calibrate=True)
+pipe.transformer.enable_cache(calibration)
+
+for prompt in ["A red bicycle beside a brick wall", "A mountain lake at sunrise"]:
+    pipe(prompt, num_inference_steps=50)
+
+compute_steps = calibration.compute_schedule(num_compute_steps=13, warmup_steps=3)
+pipe.transformer.disable_cache()
+pipe.transformer.enable_cache(DPCacheConfig(num_inference_steps=50, compute_steps=compute_steps))
+image = pipe("A sailboat on a quiet lake", num_inference_steps=50).images[0]
+```
+
+The two prompts above illustrate the API. Use a representative calibration set for your workload; the paper uses
+approximately ten samples. Schedules use zero-based execution indices, not scheduler timestep values. More compute
+steps generally improve fidelity at the cost of speed. This is an approximate optimization and changes generated
+outputs. No universal schedule or checkpoint-level speedup is assumed by this implementation.
+
+For Wan, use the same API on `pipe.transformer` with a [`WanPipeline`] and preserve `num_frames`, `height`, `width`,
+and guidance settings between calibration and inference. The initial integration covers trajectories handled by one
+transformer. A Wan pipeline that switches between two denoisers needs separate calibration and local step numbering
+for each denoiser; passing one full-trajectory schedule to both is unsupported.
+
+Save `compute_steps` as JSON to reuse a schedule, or save `calibration.cost_tensor` with `torch.save` to select other
+compute budgets later. The helpers `build_dp_cache_cost_tensor` and `compute_dp_cache_schedule` in
+`diffusers.hooks.dp_cache` also support offline calibration from final-stack features. Supply the same `max_order`
+when building costs and enabling inference.
+
+### Compilation and cache lifetime
+
+Enable the cache and compile the repeated blocks:
+
+```python
+pipe.transformer.compile_repeated_blocks(fullgraph=True)
+```
+
+The cache gate and history updates execute outside the compiled block bodies. Hooks discover existing block lists
+and use `TransformerBlockRegistry` metadata, as in the generic SeaCache and TaylorSeer integrations. Enable DPCache
+before compilation: each block hook temporarily redirects its `compile` method to compile the original forward body.
+Disabling the cache restores the ordinary compilation method. `fullgraph=True` applies to the repeated blocks; compiling the entire cached transformer as one graph
+is unsupported. Cache hits bypass block computation through the hooks, while input embedding, output normalization, and output
+projection still run. Float32 Taylor factors are cloned so cached state does not alias compiled output buffers.
+
+Pipelines reset prediction history after generation. In a custom denoising loop, attach a named context to every
+call and restart at index zero for each independent trajectory:
+
+```python
+with transformer.cache_context("cond", step_index=i, num_inference_steps=50):
+    noise_pred = transformer(**model_inputs)
+```
+
+Use separate `"cond"` and `"uncond"` contexts for separate guidance calls. A custom loop without explicit step indices
+must call `transformer._reset_stateful_cache()` between runs. Calls with autograd enabled execute normally without
+updating the cache. Disable caching with `pipe.transformer.disable_cache()`.
+
+### Calibration and model integration details
+
+The cost tensor uses execution order and includes a predicted terminal sentinel, which is never a compute step.
+Second-order calibration follows the reference implementation's use of the feature immediately preceding the
+anchor to estimate its derivative. It is an approximation to earlier selected history. This implementation uses
+an extrapolated sentinel as described in the paper, without the reference code's experimental noisy sentinel blend.
+The DP solver retains both previous steps to find the exact minimum of the supplied three-dimensional costs; this
+uses O(K T³) time and O(K T²) backtracking storage. Optimality for this cost tensor is not a guarantee of optimal
+image or video quality.
+
+Other models can integrate through existing named transformer block lists and `TransformerBlockRegistry` metadata.
+Blocks must return a tensor or a pair of hidden and encoder hidden states, and the last block must expose the final
+features used for prediction. Provide a cache context per trajectory. No Wan or FLUX model forward methods are changed.
+Model-specific operations between blocks still need validation before claiming support.
+Distributed execution and offloading combinations have not been validated for DPCache.
+
 ## SeaCache
 
 [SeaCache](https://huggingface.co/papers/2602.18993) compares Spectral-Evolution-Aware (SEA) indicators between

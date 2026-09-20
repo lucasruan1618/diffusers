@@ -28,6 +28,7 @@ class CacheMixin:
         - [Pyramid Attention Broadcast](https://huggingface.co/papers/2408.12588)
         - [FasterCache](https://huggingface.co/papers/2410.19355)
         - [FirstBlockCache](https://github.com/chengzeyi/ParaAttention/blob/7a266123671b55e7e5a2fe9af3121f07a36afc78/README.md#first-block-cache-our-dynamic-caching)
+        - [DPCache](https://huggingface.co/papers/2602.22654)
         - [SeaCache](https://huggingface.co/papers/2602.18993)
     """
 
@@ -42,8 +43,9 @@ class CacheMixin:
         Enable caching techniques on the model.
 
         Args:
-            config (`PyramidAttentionBroadcastConfig | FasterCacheConfig | FirstBlockCacheConfig | SeaCacheConfig | TextKVCacheConfig`):
+            config (`DPCacheConfig | PyramidAttentionBroadcastConfig | FasterCacheConfig | FirstBlockCacheConfig | SeaCacheConfig | TextKVCacheConfig`):
                 The configuration for applying the caching technique. Currently supported caching techniques are:
+                    - [`~hooks.DPCacheConfig`]
                     - [`~hooks.PyramidAttentionBroadcastConfig`]
                     - [`~hooks.FasterCacheConfig`]
                     - [`~hooks.FirstBlockCacheConfig`]
@@ -69,6 +71,7 @@ class CacheMixin:
         """
 
         from ..hooks import (
+            DPCacheConfig,
             FasterCacheConfig,
             FirstBlockCacheConfig,
             HookRegistry,
@@ -77,6 +80,7 @@ class CacheMixin:
             SeaCacheConfig,
             TaylorSeerCacheConfig,
             TextKVCacheConfig,
+            apply_dp_cache,
             apply_faster_cache,
             apply_first_block_cache,
             apply_mag_cache,
@@ -91,7 +95,9 @@ class CacheMixin:
                 f"Caching has already been enabled with {type(self._cache_config)}. To apply a new caching technique, please disable the existing one first."
             )
 
-        if isinstance(config, FasterCacheConfig):
+        if isinstance(config, DPCacheConfig):
+            apply_dp_cache(self, config)
+        elif isinstance(config, FasterCacheConfig):
             apply_faster_cache(self, config)
         elif isinstance(config, FirstBlockCacheConfig):
             apply_first_block_cache(self, config)
@@ -117,6 +123,7 @@ class CacheMixin:
 
     def disable_cache(self) -> None:
         from ..hooks import (
+            DPCacheConfig,
             FasterCacheConfig,
             FirstBlockCacheConfig,
             HookRegistry,
@@ -126,6 +133,7 @@ class CacheMixin:
             TaylorSeerCacheConfig,
             TextKVCacheConfig,
         )
+        from ..hooks.dp_cache import _DP_CACHE_BLOCK_HOOK, _DP_CACHE_HOOK
         from ..hooks.faster_cache import _FASTER_CACHE_BLOCK_HOOK, _FASTER_CACHE_DENOISER_HOOK
         from ..hooks.first_block_cache import _FBC_BLOCK_HOOK, _FBC_LEADER_BLOCK_HOOK
         from ..hooks.mag_cache import _MAG_CACHE_BLOCK_HOOK, _MAG_CACHE_LEADER_BLOCK_HOOK
@@ -144,7 +152,10 @@ class CacheMixin:
             return
 
         registry = HookRegistry.check_if_exists_or_initialize(self)
-        if isinstance(self._cache_config, FasterCacheConfig):
+        if isinstance(self._cache_config, DPCacheConfig):
+            registry.remove_hook(_DP_CACHE_BLOCK_HOOK, recurse=True)
+            registry.remove_hook(_DP_CACHE_HOOK, recurse=True)
+        elif isinstance(self._cache_config, FasterCacheConfig):
             registry.remove_hook(_FASTER_CACHE_DENOISER_HOOK, recurse=True)
             registry.remove_hook(_FASTER_CACHE_BLOCK_HOOK, recurse=True)
         elif isinstance(self._cache_config, FirstBlockCacheConfig):
